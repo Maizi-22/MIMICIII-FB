@@ -1,0 +1,193 @@
+---
+title: "Fluid balance in sepsis patients, MIMIC database"
+author: "yuanzhang"
+date: "Jan 8, 2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r  warning=FALSE, echo=FALSE, message=FALSE}
+source('~/Documents/R-projects/MIMICIII_FB/scr/helper.R')
+```
+
+### Study cohort: all sepsis patients in mimic
+```{r load data, warning=FALSE, message=FALSE}
+library(readr)
+data.raw.sepsis <- read_csv("~/Documents/R-projects/MIMICIII_FB/data/finaldata/data_sepsis_update.csv")[, -1]
+# convert binary variable to factor
+bincols <- colMeans((data.raw.sepsis == 1 | data.raw.sepsis == 0), na.rm = T) ==1
+for (i in 1:length(bincols)){
+  if(bincols[i]){
+    data.raw.sepsis[[i]] <- as.factor(data.raw.sepsis[[i]])
+  }
+}
+```
+
+> 1. Relation between Hospital mortality, SOFA and Fluid balance
+
+Figure 1.1, 1.2
+```{r message=FALSE,echo=FALSE,warning=FALSE}
+fb24.mr <- GetMR(data.raw.sepsis, 'fb24hr', 'hospital_expire_flag')
+fb24.mr28 <- GetMR(data.raw.sepsis, 'fb24hr', 'expire_flag_28')
+fb24.sofa <- GetSofa(data.raw.sepsis, 'fb24hr', 'sofa')
+
+plot(fb24.mr[2, ]~fb24.mr[1, ], type = 'l', xlab = ' ', ylab = 'hospital mortality ', main = 'Relation between Hospital mortality and 24 hr Fluid balance', ylim = c(0, 0.3), col = 'dark blue', axes = F, col.lab = 'dark blue')
+axis(2, col = 'dark blue', col.axis = 'dark blue')
+par(new = TRUE)
+plot(fb24.sofa[2, ]~fb24.sofa[1, ], type = 'b', xlab = ' ', ylab = ' ', main = ' ', ylim = c(0, 11), col = 'red', axes = F, col.lab = 'red')
+par(new = TRUE)
+hist(data.raw.sepsis$fb24hr, breaks = 200, col = 8, xlim = c(-4000, 12000), ylim = c(0, 2500), axes = F, ylab = '', xlab = 'Fluid balance/ml', main = '')
+axis(4, col = 1, col.axis = 1)
+axis(1)
+legend('topleft', legend = c('Death Percent   ', 'Patient Number   ', 'SOFA    '), text.col = c('dark blue', 'black', 'red'))
+
+# 28-day-mortality
+hist(data.raw.sepsis$fb24hr, breaks = 200, col = 8, xlim = c(-4000, 12000), ylim = c(0, 2500), axes = F, ylab = '', xlab = 'Fluid balance/ml', main = '')
+axis(4, col = 1, col.axis = 1)
+axis(1)
+par(new = TRUE)
+plot(fb24.sofa[2, ]~fb24.sofa[1, ], type = 'b', xlab = ' ', ylab = ' ', main = ' ', ylim = c(0, 11), col = 'red', axes = F, col.lab = 'red')
+par(new = TRUE)
+plot(fb24.mr28[2, ]~fb24.mr28[1, ], type = 'l', xlab = ' ', ylab = '28-days mortality ', main = 'Relation between 28-days mortality and 24 hr Fluid balance', ylim = c(0, 0.3), col = 'dark blue', axes = F, col.lab = 'dark blue')
+axis(2, col = 'dark blue', col.axis = 'dark blue')
+
+legend('topleft', legend = c('Death Percent   ', 'Patient Number   ', 'SOFA    '), text.col = c('dark blue', 'black', 'red'))
+```
+
+> 2. Baseline characteristics, stratifited by quaitile of 2hr-FB
+
+Table 1.2
+```{r message=FALSE,echo=FALSE,warning=FALSE}
+# remove 0.5% and 99.5% of fluid balance in the raw data
+a <- quantile(data.raw.sepsis$fb24hr, c(.005,.995))
+data.raw.sepsis <- subset(data.raw.sepsis, data.raw.sepsis$fb24hr >= a[1] & data.raw.sepsis$fb24hr <= a[2])
+
+# add group variable that respect to quatile of 24hr FB
+data.raw.sepsis <- AddGroupVar(data.raw.sepsis, 'fb24hr')   
+
+library(tableone)
+datavar <- c("age", "gender", "weight", "los_hospital", "los_icu", "Mechanical_ventilation_duration", "diabetes", "hypertension", "congestive_heart_failure", "renal_failure", "liver_disease", "cancer", "aids", "chronic_pulmonary", "obesity", "dialysis", "eskd", "pul", "sofa", "mingcs", "oasis", "hemoglobin", "creatinine", "wbc", "temp_value", "resp_rate", "heart_rate", "mean_bp",  "fb24hr", "hospital_expire_flag", "icu_expire_flag", "expire_flag_28") 
+base.table <- CreateTableOne(vars = datavar, strata = "group", data = data.raw.sepsis)
+
+nonNormalVars <- c("fb24hr")
+# nonNormalVars <- c("age", "gender", "weight", "los_hospital", "los_icu", "Mechanical_ventilation_duration", "diabetes", "hypertension", "congestive_heart_failure", "renal_failure", "liver_disease", "cancer", "aids", "chronic_pulmonary", "obesity", "dialysis", "eskd", "pul", "sofa", "mingcs", "oasis", "hemoglobin", "creatinine", "wbc", "temp_value", "resp_rate", "heart_rate", "mean_bp",  "fb24hr", "hospital_expire_flag", "icu_expire_flag", "expire_flag_28") 
+base.table2 <- print(base.table, nonnormal = nonNormalVars)
+
+# save results
+a <- print(base.table2)[, -6]
+g1 <- paste('Group1', '(n=', a[1,1], ')')
+g2 <- paste('Group2', '(n=', a[1,2], ')')
+g3 <- paste('Group3', '(n=', a[1,3], ')')
+g4 <- paste('Group4', '(n=', a[1,4], ')')
+colnames(a) <- c(g1, g2, g3, g4, 'p-value')
+a <- a[-1, ]
+write.csv(a, "~/Documents/R-projects/MIMICIII_FB/results/baseline.csv")
+```
+
+
+
+> 3. Use logistic regression to evaluate Relationship between fluid balance and Hospital mortality status, stratified by quartile of fluid balance
+
+```{r message=FALSE,echo=FALSE,warning=FALSE}
+# data interpolation
+library(Hmisc)
+library(dplyr)
+# convert ml to L for fluid balance
+data.raw.sepsis[, c('fb3hr', 'fb12hr', 'fb24hr', 'fb48hr', 'fb72hr')] <- data.raw.sepsis[, c('fb3hr', 'fb12hr', 'fb24hr', 'fb48hr', 'fb72hr')]/1000
+# data interpolation
+DataImpute <- function(x){
+  result <- impute(x, median)
+}
+data.raw.sepsis[, c('weight', 'resp_rate', 'temp_value', 'wbc', 'creatinine', 'hemoglobin', 'mingcs')] <- lapply(data.raw.sepsis[, c('weight', 'resp_rate', 'temp_value', 'wbc', 'creatinine', 'hemoglobin', 'mingcs')], DataImpute)
+
+data.pul <- subset(data.raw.sepsis, data.raw.sepsis$pul == 1)
+data.ckd <- subset(data.raw.sepsis, data.raw.sepsis$renal_failure == 1)
+data.chf <- subset(data.raw.sepsis, data.raw.sepsis$congestive_heart_failure == 1)
+data.hpt <- subset(data.raw.sepsis, data.raw.sepsis$hypertension == 1)
+  # split data into four group according to x
+  # add a variable called group
+  # data.raw.sepsis <- AddGroupVar(data.raw.sepsis, 'fb24hr')   
+  data.pul <- AddGroupVar(data.pul, 'fb24hr') 
+  data.ckd <- AddGroupVar(data.ckd, 'fb24hr') 
+  data.chf <- AddGroupVar(data.chf, 'fb24hr') 
+  data.hpt <- AddGroupVar(data.hpt, 'fb24hr') 
+```
+
+> Use glm to evalaute Relationship between fluid balance and hospital expire status
+
+Table 1.5
+```{r message=FALSE,echo=FALSE,warning=FALSE}
+# 24hr fb
+glm.result <- GetLogisticRegression(data.raw.sepsis, 'hospital_expire_flag', 'fb24hr', data.pul, data.ckd, data.chf, data.hpt)
+write.csv(glm.result, '~/Desktop/logistic_result_hos_24.csv')
+```
+
+> Use glm to evalaute Relationship between fluid balance and icu expire status
+
+Table 1.4
+```{r message=FALSE,echo=FALSE,warning=FALSE}
+# 24hr fb
+glm.result2 <- GetLogisticRegression(data.raw.sepsis, 'icu_expire_flag', 'fb24hr', data.pul, data.ckd, data.chf, data.hpt)
+write.csv(glm.result2, '~/Desktop/logistic_result_icu_24.csv')
+```
+
+> Use glm to evalaute Relationship between fluid balance and 28-day expire status
+
+Table 1.3
+```{r message=FALSE,echo=FALSE,warning=FALSE}
+# 24hr fb
+glm.result3 <- GetLogisticRegression(data.raw.sepsis, 'expire_flag_28', 'fb24hr', data.pul, data.ckd, data.chf, data.hpt)
+write.csv(glm.result3, '~/Desktop/logistic_result_ex28_24.csv')
+```
+
+> Use lm to evalaute Relationship between fluid balance and LOS ICU
+
+Table 1.6
+```{r message=FALSE,echo=FALSE,warning=FALSE}
+# 24hr fb
+lm.result <- GetlinearRegression(data.raw.sepsis, 'los_icu', 'fb24hr', data.pul, data.ckd, data.chf, data.hpt)
+write.csv(lm.result, '~/Desktop/linear_regression_result_losicu_24.csv')
+```
+
+> logistic regression for different FB groups, hospital mortality status
+
+Table 1.9
+```{r}
+model.output <- glm(formula = hospital_expire_flag ~ age + gender + weight + hemoglobin + creatinine + wbc + temp_value + resp_rate + heart_rate + mean_bp + Mechanical_ventilation_duration + mingcs + sofa + diabetes + hypertension + congestive_heart_failure + renal_failure + liver_disease + cancer + aids + chronic_pulmonary + obesity + eskd + pul + dialysis + group, family = binomial(link='logit'), data = data.raw.sepsis)
+b1 <- cbind(round(exp(coef(model.output)), 2), round(exp(confint(model.output)), 2), p_value = round(coef(summary(model.output))[, 4], 3))
+  b1 <- cbind(paste(b1[, 1], '(', b1[, 2], ',', b1[, 3], ')'), b1[, 4])
+  b1 <- as.data.frame(b1)
+  colnames(b1) <- c('Per 1 mL increase in fluid balance', 'p value')
+  b1$`p value` <- as.character(b1$`p value`)
+  b1[which(b1$`p value` == 0), 2] <- c('< 0.001')
+write.csv(b1, '~/Desktop/table1_9.csv')
+```
+
+> logistic regression for different FB groups, ICU mortality status
+
+Table 1.8
+```{r}
+model.output <- glm(formula = icu_expire_flag ~ age + gender + weight + hemoglobin + creatinine + wbc + temp_value + resp_rate + heart_rate + mean_bp + Mechanical_ventilation_duration + mingcs + sofa + diabetes + hypertension + congestive_heart_failure + renal_failure + liver_disease + cancer + aids + chronic_pulmonary + obesity + eskd + pul + dialysis + group, family = binomial(link='logit'), data = data.raw.sepsis)
+b1 <- cbind(round(exp(coef(model.output)), 2), round(exp(confint(model.output)), 2), p_value = round(coef(summary(model.output))[, 4], 3))
+  b1 <- cbind(paste(b1[, 1], '(', b1[, 2], ',', b1[, 3], ')'), b1[, 4])
+  b1 <- as.data.frame(b1)
+  colnames(b1) <- c('Per 1 mL increase in fluid balance', 'p value')
+  b1$`p value` <- as.character(b1$`p value`)
+  b1[which(b1$`p value` == 0), 2] <- c('< 0.001')
+write.csv(b1, '~/Desktop/table1_8.csv')
+```
+
+> logistic regression for different FB groups, 28-day mortality status
+
+Table 1.7
+```{r}
+model.output <- glm(formula = expire_flag_28 ~ age + gender + weight + hemoglobin + creatinine + wbc + temp_value + resp_rate + heart_rate + mean_bp + Mechanical_ventilation_duration + mingcs + sofa + diabetes + hypertension + congestive_heart_failure + renal_failure + liver_disease + cancer + aids + chronic_pulmonary + obesity + eskd + pul + dialysis + group, family = binomial(link='logit'), data = data.raw.sepsis)
+b1 <- cbind(round(exp(coef(model.output)), 2), round(exp(confint(model.output)), 2), p_value = round(coef(summary(model.output))[, 4], 3))
+  b1 <- cbind(paste(b1[, 1], '(', b1[, 2], ',', b1[, 3], ')'), b1[, 4])
+  b1 <- as.data.frame(b1)
+  colnames(b1) <- c('Per 1 mL increase in fluid balance', 'p value')
+  b1$`p value` <- as.character(b1$`p value`)
+  b1[which(b1$`p value` == 0), 2] <- c('< 0.001')
+write.csv(b1, '~/Desktop/table1_7.csv')
+```
