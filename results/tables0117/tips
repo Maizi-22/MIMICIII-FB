@@ -1,0 +1,25 @@
+model1
+data[[x]] + age + gender + group
+
+model2
+age + gender + weight + hemoglobin + creatinine + wbc + temp_value + resp_rate + heart_rate + sys_bp + dias_bp + mean_bp + group
+
+model3
+ if (pul == 0 & ckd == 0){
+    glm.test3 <- glm(formula = data[[y]] ~ data[[x]] + age + weight + Mechanical_ventilation_duration + 
+                       mingcs + sofa + liver_disease + aids + chronic_pulmonary + 
+                       dialysis + resp_rate + mean_bp + group, family = binomial(link='logit')
+                    , data = data)
+  } else if (pul == 1 & ckd == 0){
+    glm.test3 <- glm(formula = data[[y]] ~ data[[x]] + age + weight + Mechanical_ventilation_duration + 
+                       mingcs + sofa + liver_disease + aids + chronic_pulmonary + 
+                       dialysis + resp_rate + mean_bp + group, family = binomial(link='logit')
+                    , data = data)
+  } else if (pul == 0 & ckd == 1){
+    glm.test3 <- glm(formula = data[[y]] ~ data[[x]] + age + weight + Mechanical_ventilation_duration + 
+                       mingcs + sofa + liver_disease + chronic_pulmonary + dialysis + 
+                       resp_rate + mean_bp + group, family = binomial(link='logit')
+                    , data = data)
+  }
+  
+
